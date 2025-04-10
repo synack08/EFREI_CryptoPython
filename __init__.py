@@ -1,4 +1,4 @@
- from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet
 from flask import Flask, render_template
 import os
 
