@@ -1,61 +1,68 @@
-name: Industrialisation continue sur le serveur Alwaysdata
+name: Industrialisation continue sur AlwaysData
 
-on: push
+on:
+  push:
+    branches: [ main ]           # adapte la branche si nécessaire
+
+env:
+  HOST: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
 
 jobs:
-  Connexion:
+# ────────────────────────────────────────────────
+# 1. Connexion + déploiement
+# ────────────────────────────────────────────────
+  deploy:
     runs-on: ubuntu-latest
-    steps:
-      
-name: Connexion SSH avec le serveur
-      uses: appleboy/ssh-action@master
-      with:
-        host: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
-        username: ${{ secrets.USERNAME }}
-        key: ${{ secrets.ID_RSA }}
-        script: |
-          cd $HOME/www/,
 
-  Copy:
-    needs: Connexion
-    runs-on: ubuntu-latest
     steps:
-      
-name: Connexion SSH avec le serveur
-      uses: appleboy/ssh-action@master
-      with:
-        host: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
-        username: ${{ secrets.USERNAME }}
-        key: ${{ secrets.ID_RSA }}
-        script: |
-          last_directory=$(basename ${{ runner.workspace }})
-          cd $HOME/www/
-          git clone https://github.com/$%7B%7B github.repository }}.git
-          if [ "$(ls -A ./flask)" ]; then
-            rsync -r ./$last_directory/ ./flask
-            rm -rf ./$last_directory
-          else
-            echo "Le répertoire flask de destination sur votre serveur n'existe pas"
-            exit 1
-          fi,
+      - uses: actions/checkout@v4        # on récupère le code (utile pour le nom du repo)
 
-  Restart:
-    needs: Copy
-    runs-on: ubuntu-latest
-    steps:
-      
-name: Restart Alwaysdata site
-      run: |
-        response_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST --basic --user "${{ secrets.ALWAYSDATA_TOKEN }}:" https://api.alwaysdata.com/v1/site/$%7B%7B secrets.ALWAYSDATA_SITE_ID }}/restart/)
-        if [ "$response_code" -eq 204 ]; then
-          echo "Relance de votre site réussi"
-        elif [ "$response_code" -eq 404 ]; then
-          echo "Vous n'avez pas renseigné correctement votre secret ALWAYSDATA_SITE_ID"
-          exit 1
-        elif [ "$response_code" -eq 401 ]; then
-          echo "Vous n'avez pas renseigné correctement votre secret ALWAYSDATA_TOKEN"
-          exit 1
-        else
-          echo "Échec du redémarrage avec le code de réponse : $response_code"
-          exit 1
-        fi,
+      - name: Connexion SSH et mise à jour du code
+        uses: appleboy/ssh-action@master
+        with:
+          host:     ${{ env.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key:      ${{ secrets.ID_RSA }}
+          port:     22
+          debug:    true                 # ôte-le quand tout fonctionne
+          script: |
+            set -e
+            cd $HOME/www
+
+            repo=$(basename "${GITHUB_REPOSITORY}")
+            branch="${{ github.ref_name }}"     # branche pushée, ex. main
+
+            echo "=== Déploiement sur $repo ($branch) ==="
+
+            # clone initial si besoin
+            if [ ! -d "$repo" ]; then
+              git clone --depth=1 --branch "$branch" \
+                https://github.com/${GITHUB_REPOSITORY}.git
+            fi
+
+            cd "$repo"
+            git pull origin "$branch"
+
+            # ---- place ici tes commandes build / pip install etc. ----
+            echo "🎉 Code mis à jour"
+
+# ────────────────────────────────────────────────
+# 2. Redémarrage du site AlwaysData
+# ────────────────────────────────────────────────
+      - name: Restart AlwaysData site
+        run: |
+          set -e
+          SITE_ID=${{ secrets.ALWAYSDATA_SITE_ID }}
+          TOKEN=${{ secrets.ALWAYSDATA_TOKEN }}
+
+          echo "🔄 Redémarrage du site $SITE_ID ..."
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -X POST --user "${TOKEN}:" \
+                  "https://api.alwaysdata.com/v1/site/${SITE_ID}/restart/")
+
+          case "$code" in
+            204) echo "✅ Site relancé" ;;
+            404) echo "❌ SITE_ID incorrect" && exit 1 ;;
+            401) echo "❌ TOKEN incorrect"    && exit 1 ;;
+            *)   echo "❌ Erreur API (code $code)" && exit 1 ;;
+          esac
