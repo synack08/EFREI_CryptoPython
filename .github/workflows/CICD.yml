@@ -1,56 +1,53 @@
-name: Industrialisation continue sur le serveur Alwaysdata
-on: push
+name: Industrialisation continue sur AlwaysData
+
+on: [push]                             # ou on: push: { branches: [ main ] }
+
+env:
+  HOST: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
+
 jobs:
-  Connexion:
+  deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Connexion SSH avec le serveur
+      # 0) Récupérer le dépôt localement pour connaître son nom
+      - uses: actions/checkout@v4
+
+      # 1) Copie / mise à jour du code sur le serveur
+      - name: Déploiement via SSH
         uses: appleboy/ssh-action@master
         with:
-          host: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
+          host:   ${{ env.HOST }}
+          port:   22
           username: ${{ secrets.USERNAME }}
-          password: ${{ secrets.PASSWORD }}
+          key:   ${{ secrets.SSH_KEY }}        # ← la clé stockée en secret
           script: |
-            cd $HOME/www/
-  Copy:
-    needs: Connexion
-    runs-on: ubuntu-latest
-    steps:
-      - name: Connexion SSH avec le serveur
-        uses: appleboy/ssh-action@master
-        with:
-          host: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
-          username: ${{ secrets.USERNAME }}
-          password: ${{ secrets.PASSWORD }}
-          script: |
-            last_directory=$(basename ${{ runner.workspace }})
-            cd $HOME/www/
-            git clone https://github.com/${{ github.repository }}.git
-            # Vérifier si le répertoire de destination existe
-            if [ "$(ls -A ./flask)" ]; then
-              rsync -r ./$last_directory/ ./flask
-              rm -rf ./$last_directory
-            else
-              echo "Le répertoire flask de destination sur votre serveur n'existe pas"
-              exit 1
+            set -e
+            cd $HOME/www
+
+            repo_name=$(basename "${GITHUB_REPOSITORY}")
+            if [ ! -d "$repo_name" ]; then
+              git clone https://github.com/${GITHUB_REPOSITORY}.git
             fi
-  Restart:
-    needs: Copy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Restart Alwaysdata site
+
+            cd "$repo_name"
+            git pull origin ${{ github.ref_name }}
+
+            # si votre appli est dans un sous-dossier flask/, adaptez :
+            # rsync -r ./flask/ ../flask
+
+            echo "🎉 Code à jour sur AlwaysData"
+
+      # 2) Relancer le site AlwaysData via leur API
+      - name: Restart AlwaysData site
         run: |
-          response_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST --basic --user "${{ secrets.ALWAYSDATA_TOKEN }}:" https://api.alwaysdata.com/v1/site/${{ secrets.ALWAYSDATA_SITE_ID }}/restart/)
-          # Vérifier le code de réponse HTTP
-          if [ "$response_code" -eq 204 ]; then
-            echo "Relance de votre site réussi"
-          elif [ "$response_code" -eq 404 ]; then
-            echo "Vous n'avez pas renseigner correctement votre secret ALWAYSDATA_SITE_ID"
-            exit 1  # Quitter avec un code d'erreur
-          elif [ "$response_code" -eq 401 ]; then
-            echo "Vous n'avez pas renseigner correctement votre secret ALWAYSDATA_TOKEN"
-          exit 1  # Quitter avec un code d'erreur
-          else
-            echo "Échec du redémarrage avec le code de réponse : $response_code"
-            exit 1  # Quitter avec un code d'erreur
-          fi
+          set -e
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST --user "${{ secrets.ALWAYSDATA_TOKEN }}:" \
+            "https://api.alwaysdata.com/v1/site/${{ secrets.ALWAYSDATA_SITE_ID }}/restart/")
+          case "$code" in
+            204) echo "✅ Site relancé" ;;
+            401) echo "❌ TOKEN invalide" && exit 1 ;;
+            404) echo "❌ SITE_ID invalide" && exit 1 ;;
+            *)   echo "❌ Erreur API (code $code)" && exit 1 ;;
+          esac
