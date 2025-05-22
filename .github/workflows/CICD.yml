@@ -1,6 +1,8 @@
-name: Industrialisation continue sur AlwaysData
+name: Déploiement sur AlwaysData
 
-on: [push]                             # ou on: push: { branches: [ main ] }
+on:
+  push:
+    branches: [ main ]        # adapte si besoin
 
 env:
   HOST: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
@@ -10,44 +12,45 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 0) Récupérer le dépôt localement pour connaître son nom
+      # Clone le dépôt dans le runner
       - uses: actions/checkout@v4
 
-      # 1) Copie / mise à jour du code sur le serveur
+      # 1. Connexion SSH + pull / build
       - name: Déploiement via SSH
         uses: appleboy/ssh-action@master
         with:
-          host:   ${{ env.HOST }}
-          port:   22
+          host:     ${{ env.HOST }}
           username: ${{ secrets.USERNAME }}
-          key:   ${{ secrets.SSH_KEY }}        # ← la clé stockée en secret
+          key:      ${{ secrets.SSH_KEY }}   # ← la clé privée que tu viens d’ajouter
+          port:     22
+          debug:    true                     # utile la 1re fois
           script: |
             set -e
             cd $HOME/www
 
-            repo_name=$(basename "${GITHUB_REPOSITORY}")
-            if [ ! -d "$repo_name" ]; then
-              git clone https://github.com/${GITHUB_REPOSITORY}.git
+            repo=$(basename "${GITHUB_REPOSITORY}")
+            branch="${{ github.ref_name }}"
+
+            if [ ! -d "$repo" ]; then
+              git clone --depth=1 --branch "$branch" https://github.com/${GITHUB_REPOSITORY}.git
             fi
 
-            cd "$repo_name"
-            git pull origin ${{ github.ref_name }}
+            cd "$repo"
+            git pull origin "$branch"
 
-            # si votre appli est dans un sous-dossier flask/, adaptez :
-            # rsync -r ./flask/ ../flask
+            # Ici, place ton build (pip install, npm install, migrations…)
+            echo "🎉 Déploiement terminé"
 
-            echo "🎉 Code à jour sur AlwaysData"
-
-      # 2) Relancer le site AlwaysData via leur API
+      # 2. Redémarrage du site via l’API AlwaysData
       - name: Restart AlwaysData site
         run: |
           set -e
           code=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST --user "${{ secrets.ALWAYSDATA_TOKEN }}:" \
-            "https://api.alwaysdata.com/v1/site/${{ secrets.ALWAYSDATA_SITE_ID }}/restart/")
+                -X POST --user "${{ secrets.ALWAYSDATA_TOKEN }}:" \
+                "https://api.alwaysdata.com/v1/site/${{ secrets.ALWAYSDATA_SITE_ID }}/restart/")
           case "$code" in
             204) echo "✅ Site relancé" ;;
-            401) echo "❌ TOKEN invalide" && exit 1 ;;
-            404) echo "❌ SITE_ID invalide" && exit 1 ;;
+            401) echo "❌ TOKEN incorrect" && exit 1 ;;
+            404) echo "❌ SITE_ID incorrect" && exit 1 ;;
             *)   echo "❌ Erreur API (code $code)" && exit 1 ;;
           esac
