@@ -1,56 +1,61 @@
-name: Déploiement sur AlwaysData
+name: Industrialisation continue sur le serveur Alwaysdata
 
-on:
-  push:
-    branches: [ main ]        # adapte si besoin
-
-env:
-  HOST: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
+on: push
 
 jobs:
-  deploy:
+  Connexion:
     runs-on: ubuntu-latest
-
     steps:
-      # Clone le dépôt dans le runner
-      - uses: actions/checkout@v4
+      
+name: Connexion SSH avec le serveur
+      uses: appleboy/ssh-action@master
+      with:
+        host: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.ID_RSA }}
+        script: |
+          cd $HOME/www/,
 
-      # 1. Connexion SSH + pull / build
-      - name: Déploiement via SSH
-        uses: appleboy/ssh-action@master
-        with:
-          host:     ${{ env.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key:      ${{ secrets.SSH_KEY }}   # ← la clé privée que tu viens d’ajouter
-          port:     22
-          debug:    true                     # utile la 1re fois
-          script: |
-            set -e
-            cd $HOME/www
+  Copy:
+    needs: Connexion
+    runs-on: ubuntu-latest
+    steps:
+      
+name: Connexion SSH avec le serveur
+      uses: appleboy/ssh-action@master
+      with:
+        host: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.ID_RSA }}
+        script: |
+          last_directory=$(basename ${{ runner.workspace }})
+          cd $HOME/www/
+          git clone https://github.com/$%7B%7B github.repository }}.git
+          if [ "$(ls -A ./flask)" ]; then
+            rsync -r ./$last_directory/ ./flask
+            rm -rf ./$last_directory
+          else
+            echo "Le répertoire flask de destination sur votre serveur n'existe pas"
+            exit 1
+          fi,
 
-            repo=$(basename "${GITHUB_REPOSITORY}")
-            branch="${{ github.ref_name }}"
-
-            if [ ! -d "$repo" ]; then
-              git clone --depth=1 --branch "$branch" https://github.com/${GITHUB_REPOSITORY}.git
-            fi
-
-            cd "$repo"
-            git pull origin "$branch"
-
-            # Ici, place ton build (pip install, npm install, migrations…)
-            echo "🎉 Déploiement terminé"
-
-      # 2. Redémarrage du site via l’API AlwaysData
-      - name: Restart AlwaysData site
-        run: |
-          set -e
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-                -X POST --user "${{ secrets.ALWAYSDATA_TOKEN }}:" \
-                "https://api.alwaysdata.com/v1/site/${{ secrets.ALWAYSDATA_SITE_ID }}/restart/")
-          case "$code" in
-            204) echo "✅ Site relancé" ;;
-            401) echo "❌ TOKEN incorrect" && exit 1 ;;
-            404) echo "❌ SITE_ID incorrect" && exit 1 ;;
-            *)   echo "❌ Erreur API (code $code)" && exit 1 ;;
-          esac
+  Restart:
+    needs: Copy
+    runs-on: ubuntu-latest
+    steps:
+      
+name: Restart Alwaysdata site
+      run: |
+        response_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST --basic --user "${{ secrets.ALWAYSDATA_TOKEN }}:" https://api.alwaysdata.com/v1/site/$%7B%7B secrets.ALWAYSDATA_SITE_ID }}/restart/)
+        if [ "$response_code" -eq 204 ]; then
+          echo "Relance de votre site réussi"
+        elif [ "$response_code" -eq 404 ]; then
+          echo "Vous n'avez pas renseigné correctement votre secret ALWAYSDATA_SITE_ID"
+          exit 1
+        elif [ "$response_code" -eq 401 ]; then
+          echo "Vous n'avez pas renseigné correctement votre secret ALWAYSDATA_TOKEN"
+          exit 1
+        else
+          echo "Échec du redémarrage avec le code de réponse : $response_code"
+          exit 1
+        fi,
