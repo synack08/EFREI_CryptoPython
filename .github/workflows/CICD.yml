@@ -1,8 +1,16 @@
+name: Déploiement Alwaysdata
+
+on:
+  push:
+    branches:
+      - main  # Déclenche le workflow à chaque push sur la branche "main"
+  workflow_dispatch:  # Permet d'exécuter manuellement le workflow depuis GitHub
+
 jobs:
   Connexion:
     runs-on: ubuntu-latest
     steps:
-      - name: Connexion SSH avec le serveur Alwaysdata
+      - name: Connexion SSH avec Alwaysdata
         uses: appleboy/ssh-action@master
         with:
           host: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
@@ -10,4 +18,4 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             cd $HOME/www/
-            ls -la
+            ls -la  # Vérification du dossier
