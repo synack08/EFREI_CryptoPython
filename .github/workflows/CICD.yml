@@ -1,68 +1,48 @@
-name: Industrialisation continue sur AlwaysData
+name: Deploy on AlwaysData
 
 on:
   push:
-    branches: [ main ]           # adapte la branche si nécessaire
+    branches: [ main ]
 
 env:
   HOST: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
 
 jobs:
-# ────────────────────────────────────────────────
-# 1. Connexion + déploiement
-# ────────────────────────────────────────────────
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4        # on récupère le code (utile pour le nom du repo)
+      - uses: actions/checkout@v4
 
-      - name: Connexion SSH et mise à jour du code
+      # DEBUG – supprime quand ça marche
+      - name: Debug longueur clé
+        run: echo "Length of key = ${#KEY}"
+        env:
+          KEY: ${{ secrets.ID_RSA }}
+
+      - name: Déploiement via SSH
         uses: appleboy/ssh-action@master
         with:
           host:     ${{ env.HOST }}
           username: ${{ secrets.USERNAME }}
           key:      ${{ secrets.ID_RSA }}
           port:     22
-          debug:    true                 # ôte-le quand tout fonctionne
+          passphrase: ${{ secrets.ID_RSA_PASSPHRASE }}
+          debug:    true
           script: |
             set -e
             cd $HOME/www
-
             repo=$(basename "${GITHUB_REPOSITORY}")
-            branch="${{ github.ref_name }}"     # branche pushée, ex. main
-
-            echo "=== Déploiement sur $repo ($branch) ==="
-
-            # clone initial si besoin
+            branch="${{ github.ref_name }}"
             if [ ! -d "$repo" ]; then
-              git clone --depth=1 --branch "$branch" \
-                https://github.com/${GITHUB_REPOSITORY}.git
+              git clone --depth=1 --branch "$branch" https://github.com/${GITHUB_REPOSITORY}.git
             fi
-
             cd "$repo"
             git pull origin "$branch"
-
-            # ---- place ici tes commandes build / pip install etc. ----
             echo "🎉 Code mis à jour"
 
-# ────────────────────────────────────────────────
-# 2. Redémarrage du site AlwaysData
-# ────────────────────────────────────────────────
       - name: Restart AlwaysData site
         run: |
-          set -e
-          SITE_ID=${{ secrets.ALWAYSDATA_SITE_ID }}
-          TOKEN=${{ secrets.ALWAYSDATA_TOKEN }}
-
-          echo "🔄 Redémarrage du site $SITE_ID ..."
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-                  -X POST --user "${TOKEN}:" \
-                  "https://api.alwaysdata.com/v1/site/${SITE_ID}/restart/")
-
-          case "$code" in
-            204) echo "✅ Site relancé" ;;
-            404) echo "❌ SITE_ID incorrect" && exit 1 ;;
-            401) echo "❌ TOKEN incorrect"    && exit 1 ;;
-            *)   echo "❌ Erreur API (code $code)" && exit 1 ;;
-          esac
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            --user "${{ secrets.ALWAYSDATA_TOKEN }}:" \
+            "https://api.alwaysdata.com/v1/site/${{ secrets.ALWAYSDATA_SITE_ID }}/restart/")
+          [ "$code" = 204 ] && echo "Site relancé ✅" || { echo "Échec API ($code)" ; exit 1 ; }
