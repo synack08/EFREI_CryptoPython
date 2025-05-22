@@ -1,48 +1,13 @@
-name: Deploy on AlwaysData
-
-on:
-  push:
-    branches: [ main ]
-
-env:
-  HOST: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
-
 jobs:
-  deploy:
+  Connexion:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      # DEBUG – supprime quand ça marche
-      - name: Debug longueur clé
-        run: echo "Length of key = ${#KEY}"
-        env:
-          KEY: ${{ secrets.ID_RSA }}
-
-      - name: Déploiement via SSH
+      - name: Connexion SSH avec le serveur Alwaysdata
         uses: appleboy/ssh-action@master
         with:
-          host:     ${{ env.HOST }}
+          host: "ssh-${{ secrets.USERNAME }}.alwaysdata.net"
           username: ${{ secrets.USERNAME }}
-          key:      ${{ secrets.ID_RSA }}
-          port:     22
-          passphrase: ${{ secrets.ID_RSA_PASSPHRASE }}
-          debug:    true
+          key: ${{ secrets.SSH_KEY }}
           script: |
-            set -e
-            cd $HOME/www
-            repo=$(basename "${GITHUB_REPOSITORY}")
-            branch="${{ github.ref_name }}"
-            if [ ! -d "$repo" ]; then
-              git clone --depth=1 --branch "$branch" https://github.com/${GITHUB_REPOSITORY}.git
-            fi
-            cd "$repo"
-            git pull origin "$branch"
-            echo "🎉 Code mis à jour"
-
-      - name: Restart AlwaysData site
-        run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-            --user "${{ secrets.ALWAYSDATA_TOKEN }}:" \
-            "https://api.alwaysdata.com/v1/site/${{ secrets.ALWAYSDATA_SITE_ID }}/restart/")
-          [ "$code" = 204 ] && echo "Site relancé ✅" || { echo "Échec API ($code)" ; exit 1 ; }
+            cd $HOME/www/
+            ls -la
